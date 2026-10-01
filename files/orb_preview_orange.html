@@ -1,0 +1,160 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#000;">
+<div style="display:flex; justify-content:center; align-items:center; background:#000; padding:6px 0;">
+<canvas id="ultronOrb" width="420" height="420"></canvas>
+</div>
+<script>
+(function() {
+  const canvas = document.getElementById('ultronOrb');
+  const ctx = canvas.getContext('2d');
+  const W = 420, H = 420;
+  const cx = W/2, cy = H/2;
+  const baseR = W * 0.30;
+  const rotSpeed = 0.9;
+  const noiseAmp = 0.24;
+  const glowMul = 1.6;
+  const pulseAmp = 0.02;
+  const pulseFreq = 6;
+  const focal = W * 1.4;
+
+  const latSteps = 16;
+  const lonSteps = 28;
+  const verts = [];
+  for (let i = 0; i <= latSteps; i++) {
+    const theta = (i / latSteps - 0.5) * Math.PI;
+    const row = [];
+    for (let j = 0; j < lonSteps; j++) {
+      const phi = (j / lonSteps) * Math.PI * 2;
+      const x0 = Math.cos(theta) * Math.cos(phi);
+      const y0 = Math.sin(theta);
+      const z0 = Math.cos(theta) * Math.sin(phi);
+      row.push({x0, y0, z0});
+    }
+    verts.push(row);
+  }
+
+  const stars = [];
+  for (let i = 0; i < 220; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const rad = baseR * (1.15 + Math.random() * 0.9);
+    stars.push({
+      ang: ang, rad: rad,
+      speed: (Math.random() - 0.5) * 0.15,
+      base: 0.2 + Math.random() * 0.6,
+      phase: Math.random() * Math.PI * 2,
+      size: Math.random() < 0.2 ? 2 : 1,
+      hue: 15 + Math.random() * 45
+    });
+  }
+
+  let t = 0;
+
+  function hueColor(h, alpha) {
+    return 'hsla(' + h + ',95%,58%,' + Math.max(0, Math.min(1, alpha)) + ')';
+  }
+
+  function project(x, y, z) {
+    const scale = focal / (focal + z);
+    return { x: cx + x * scale, y: cy + y * scale, scale: scale };
+  }
+
+  function draw() {
+    const grad = ctx.createRadialGradient(cx, cy, baseR*0.15, cx, cy, W*0.72);
+    grad.addColorStop(0, '#2a1204');
+    grad.addColorStop(0.5, '#150802');
+    grad.addColorStop(1, '#020100');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    const pulse = 1 + pulseAmp * Math.sin(t * pulseFreq);
+    const rotY = t * rotSpeed;
+    const rotX = 0.35 + Math.sin(t * 0.15) * 0.08;
+    const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+    const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+
+    const proj = [];
+    for (let i = 0; i <= latSteps; i++) {
+      const projRow = [];
+      for (let j = 0; j < lonSteps; j++) {
+        const v = verts[i][j];
+        const n = Math.sin(v.x0*3 + t*0.4) * Math.cos(v.y0*3 - t*0.3) * Math.sin(v.z0*3 + t*0.35);
+        const r = baseR * pulse * (1 + noiseAmp * n);
+        let x = v.x0 * r, y = v.y0 * r, z = v.z0 * r;
+
+        let xz = x*cosY - z*sinY;
+        let zz = x*sinY + z*cosY;
+        x = xz; z = zz;
+        let yz = y*cosX - z*sinX;
+        zz = y*sinX + z*cosX;
+        y = yz; z = zz;
+
+        const p = project(x, y, z);
+        const depth = (z + baseR) / (baseR*2);
+        const hue = 15 + (p.x / W) * 40;
+        const alpha = 0.15 + depth * 0.55;
+        projRow.push({x:p.x, y:p.y, hue:hue, alpha:alpha, depth:depth});
+      }
+      proj.push(projRow);
+    }
+
+    ctx.lineWidth = 0.6;
+    ctx.shadowBlur = 4 * glowMul;
+    for (let i = 0; i <= latSteps; i++) {
+      ctx.beginPath();
+      for (let j = 0; j <= lonSteps; j++) {
+        const p = proj[i][j % lonSteps];
+        if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      const mid = proj[i][0];
+      ctx.strokeStyle = hueColor(mid.hue, mid.alpha * 0.6);
+      ctx.shadowColor = hueColor(mid.hue, mid.alpha * 0.5);
+      ctx.stroke();
+    }
+    for (let j = 0; j < lonSteps; j++) {
+      ctx.beginPath();
+      for (let i = 0; i <= latSteps; i++) {
+        const p = proj[i][j];
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      const mid = proj[Math.floor(latSteps/2)][j];
+      ctx.strokeStyle = hueColor(mid.hue, mid.alpha * 0.6);
+      ctx.shadowColor = hueColor(mid.hue, mid.alpha * 0.5);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    for (let i = 0; i <= latSteps; i += 2) {
+      for (let j = 0; j < lonSteps; j += 3) {
+        const p = proj[i][j];
+        if (p.depth < 0.45) continue;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.1 * p.depth, 0, Math.PI*2);
+        ctx.fillStyle = hueColor(p.hue, Math.min(1, p.alpha + 0.25));
+        ctx.shadowColor = hueColor(p.hue, 0.9);
+        ctx.shadowBlur = 6 * glowMul * p.depth;
+        ctx.fill();
+      }
+    }
+    ctx.shadowBlur = 0;
+
+    for (const s of stars) {
+      s.ang += s.speed * 0.01 * (rotSpeed + 0.2);
+      const flick = s.base + 0.4 * Math.sin(t * 2 + s.phase);
+      const alpha = Math.max(0, Math.min(1, flick));
+      const x = cx + Math.cos(s.ang) * s.rad;
+      const y = cy + Math.sin(s.ang) * s.rad * 0.55;
+      ctx.beginPath();
+      ctx.arc(x, y, s.size, 0, Math.PI*2);
+      ctx.fillStyle = hueColor(s.hue, alpha);
+      ctx.shadowColor = hueColor(s.hue, alpha);
+      ctx.shadowBlur = 5 * glowMul;
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    t += 0.02;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+</script>
+</body></html>
